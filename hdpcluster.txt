@@ -1,0 +1,509 @@
+##################################
+# SAP HANA VORA 1.4 INSTALLATION #
+##################################
+
+# ++++++++++++++++ #
+# CLUSTER MACHINES #
+# ++++++++++++++++ #
+
+#warm-up
+sudo yum update -y
+sudo yum install -y libaio ntp git wget 
+
+#swap, hdds partitions
+sudo -i
+lsblk
+fdsik /dev/sdX
+#CREATE 50G SWAP
+#CREATE THE PARTITIONS FOR HDP
+mkswap -L SWAP /dev/sdX1
+swapon /dev/sdX1
+lsblk
+free
+mkfs.ext4 /dev/sdc2
+mkdir /mnt/data
+blkid
+echo "UUID=XXXXXXXXXX /mnt/data ext4 defaults 0 0" | tee -a /etc/fstab
+echo "UUID=YYYYYY none swap defaults 0 0" | tee -a /etc/fstab
+mount -a
+df -Th
+
+# create raid1 in master node
+mdadm --create /dev/md0 --level=1 --raid-devices=2 /dev/sdc2 /dev/sdd2
+mkfs.ext4 /dev/md0
+blkid 
+echo "UUID=XXXXXXXXXX /mnt/data ext4 defaults 0 0" | tee -a /etc/fstab
+
+
+#Check DNS and NSCD in all nodes
+hostnamectl set-hostname dev.local
+echo "10.0.0.5 dev.local" | tee -a /etc/hosts
+echo "10.0.0.4 master.hdp.io" | tee -a /etc/hosts
+echo "10.0.0.6 node1.hdp.io" | tee -a /etc/hosts
+echo "10.0.0.7 data2.hdp.io" | tee -a /etc/hosts
+echo "10.0.0.8 data3.hdp.io" | tee -a /etc/hosts
+
+sed -i 's/localhost.localdomain/dev.local/g' /etc/sysconfig/network
+
+for i in {dev.local,master.local,data1.local,data2.local,data3.local}; do ping -c 2 $i; done
+
+#Enable NTP on the Cluster
+systemctl enable ntpd
+systemctl start ntpd
+systemctl status ntpd
+
+#SAP Vora Distributed Log (DLog)
+cat /proc/sys/fs/file-max
+echo "fs.file-max=983040" | tee -a /etc/sysctl.conf
+sysctl -p
+cat /etc/security/limits.conf
+echo "*                -       nofile          1000000" | tee -a /etc/security/limits.conf
+cat /etc/security/limits.conf
+locale
+export LC_ALL=en_US.UTF-8
+locale
+#Log out or reboot so that the ulimit change takes effect.
+exit
+sudo su -
+echo umask 0022 | tee -a /etc/profile
+
+#Configure iptables
+systemctl disable firewalld
+service firewalld stop
+
+#Disable SELinux, PackageKit and Check umask Value
+setenforce 0
+sed -i 's/enforcing/disabled/g' /etc/selinux/config
+
+reboot
+
+#Set Up Service User Accounts
+sudo -i
+chmod 700 /etc/sudoers
+echo "%sysadmin ALL=(ALL) NOPASSWD:ALL" | tee -a /etc/sudoers
+chmod 440 /etc/sudoers
+groupadd sysadmin
+/usr/sbin/useradd -m -g users -G sysadmin hdp_admin
+
+#in all hosts
+passwd hdp_admin
+su - hdp_admin
+
+#Set up Password-less SSH
+ssh-keygen -t rsa
+PRESS RETURN
+PRESS RETURN
+
+chmod 700 ~/
+chmod 700 ~/.ssh
+cat ~/.ssh/id_rsa.pub >~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+cat ~/.ssh/id_rsa.pub
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDuYvwWXoPJpCXlDLktTTvLmUEudFhEi612IAUZeq7yM5ANX5tlahJlodw5cJkElMD4eCnc2x3N1uLcldYUhwns0SjGUksYzxIZ3hlDsivQkrZqBc0ua4JeRtgLhlVZyMmaz5wbvc484ySvPIVII5Hsb5d+W741x82kF4YJSLy8VRHGOHRZexxDjJN1nM/1SpCAw6T8otYHK/pj9IZTzSKpqzcDU6wFqZR7kOfcQEBJHCRZjtuydDyi/dtQP2xTjvxkVFnR3HucC0AZiDvsjpQJequgySCWnI61Km8/caU2yG95n9AICvsVfc4GpQVmIoX2d+zZkmibo4C3DOzq/Xmj
+
+# in data node as hdp_admin user
+mkdir ~/.ssh
+vi ~/.ssh/authorized_keys #copy paste the public key
+chmod 600 ~/.ssh/authorized_keys
+
+
+cat ~/.ssh/id_rsa
+-----BEGIN RSA PRIVATE KEY-----
+MIIEpQIBAAKCAQEA7mL8Fl6DyaQl5Qy5LU07y5lBLnRYRIutdiAFGXqu8jOQDV+b
+ZWoSZaHcOXCZBJTA+Hgp3Nsdzdbi3JXWFIcJ7NEoxlJLGM8SGd4ZQ7Ir0JK2agXN
+LmuCXkbYC4ZVWcjJms+cG73OPOMkrzyFSCOR7G+Xflu+NcfNpBeGCUi8vFURxjh0
+WXscQ4yTdZzP9UqQgMOk/KLWByv6Y/SGU80iqas3A1OsBamUe5Dn3EBASRwkWY7b
+snQ8ov3bUD9sU478ZFRZ0dx7nAtAGYg77I6UCXqroMkglpyOtSpvP3GlNshveZ/Q
+CAr7FX3OBqUFZiKF9nfs2ZJom6OAtwzs6v15owIDAQABAoIBAQC9m8/EfxK1rLFT
+eQZE6Rx5eYFl0LZwduTWgutrc7B5Btg6OuRgCrltSwveSBf9k8/VEcbCWypekd/J
+8gfgNfSH/2k+LTB8IB/WoVhZBvtgn4El3U1w8aQ1FoY6zHNQwarRTvZs/lBvD4Ab
+PbkJQvmLJMtLfu9Q2YZQUUGUWt17sWkYDvpH5Yq2Kxmx5/hIgyoOkYIdA+5EdPYG
+FLmIT1Ud+ptDkjiR5SgZeEc6k3UL+53dXOXDKT8koaEuiq3vee7UrSsjvHME68OR
+Xl2AItnrrqUQKyCFTQ8bJJticDO06FBdxBbSXqxxwSQici33PdYgT5dAXlWDxx5z
+ysG62UmpAoGBAP4zOwuN4YxXZpkC9mfDGa2OHJJZfnzxkuhjyVlYBcx5SC6H/NGG
+UKD5zFBvNe7JHiXcKDxMaLYbiklgEehiVEyXCT32aGNfmRuy3lYk2r9kHEs3OqWt
+ZuFVkbVdHdKE/bkrY8LamJkYe95FEwWT7qWYRWf2RY38BgmhLrhbUmAlAoGBAPAT
+Fxe4B7H1KoCI/L4vzpBYQpk5ETpOAWioEKhjlvwnESUBJi8ZoCRsUcMWD8lHc9iZ
+15Tz0/NAUgiALmWlIzhWO+jwie44URQQ7SLHNuwBYADgweaTFMfjKng/S9eAfUhc
+Xc6vyNVd/6JAX3eXLCJ/96MqN+EcSOPqWtJMG0QnAoGBALuNTQlPW5TSf65xkyAn
+wPBepBIO2daR3pR723mCCnU9HtbGGvD0qtS6uda21xIhbY79iupCbhe+5h8RNOVC
+d3QzE+yVu5tmU28uYAErHAKOeJm+XBUVhYzIN8OauoAzA4j1zJtd8a0zdWEfkdNR
+vIiNetgjylniEwpT1EbNik/JAoGAL0bzIz6gdVEcf5d6flGX0iEvbFEqrVqzOFLw
+hNin4Rwoaishw+C+Aq46I7ryfObPT3ZsV+70bFDcVsQ3Xtj4aJ3Cyoqj/v+kJ9l1
+eYXVsQBMUZ/xT2DjlMGNmYSNgPDSuy9FYfCIEkyijOc0Za6liF2+/KjRvEj/qbJ7
+FDLco70CgYEA9q7frsUueIc7sx+ZLyrlfr8FdGdbvVN6ISF2rGZE+/u7iQYQDSUT
+NCSs4Gv6AZ8WXWSKMMNBNzrtNhOQpcz4JL0uasYzn7+tIBlN3mqZiVUW5PnECFcV
+Qt4/yTDzro5K6f66mmHMkJvu1ipGN/K2UcpPOBFp01zu6lM+Qgtwi5Y=
+-----END RSA PRIVATE KEY-----
+
+
+#Ambari, HDP, and HDF support umask values of 022
+umask
+
+# +++++++++++++ #
+#   AMBARI      #
+# +++++++++++++ #
+su - hdp_admin
+
+cd /etc/yum.repos.d
+
+sudo wget http://public-repo-1.hortonworks.com/ambari/centos7/2.x/updates/2.5.2.0/ambari.repo -O /etc/yum.repos.d/ambari.repo
+sudo yum repolist
+sudo yum install -y ambari-server
+
+sudo ambari-server setup
+ACCEPT DEFAULTS
+
+# +++++++++++++ #
+#   HIVE CONIFG #
+# +++++++++++++ #
+
+#install MariaDB for HIVE
+sudo yum install -y mariadb mariadb-server mysql-connector-java 
+ls /usr/share/java/mysql-connector-java.jar
+
+sudo ambari-server setup --jdbc-db=mysql --jdbc-driver=/usr/share/java/mysql-connector-java.jar
+
+sudo systemctl enable mariadb
+sudo systemctl start mariadb
+mysql -u root -p
+ 
+CREATE USER 'hive'@'%' IDENTIFIED BY 'jfkodf080980LLL87877!!!';
+GRANT ALL PRIVILEGES ON *.* TO 'hive'@'%';
+CREATE USER 'hive'@'localhost' IDENTIFIED BY 'jfkodf080980LLL87877!!!';
+GRANT ALL PRIVILEGES ON *.* TO 'hive'@'localhost';
+CREATE USER 'hive'@'dev.local' IDENTIFIED BY 'jfkodf080980LLL87877!!!';
+GRANT ALL PRIVILEGES ON *.* TO 'hive'@'dev.local';
+FLUSH PRIVILEGES;
+exit;
+
+mysql -u hive -p
+CREATE DATABASE hive;
+exit;
+
+# +++++++++++++ #
+#  OOZIE CONIFG #
+# +++++++++++++ #
+
+#install MariaDB for OOZIE
+mysql -u root -p
+ 
+CREATE USER 'oozie'@'%' IDENTIFIED BY 'jfkodf080980LLL87877!!!';
+GRANT ALL PRIVILEGES ON *.* TO 'oozie'@'%';
+CREATE USER 'oozie'@'localhost' IDENTIFIED BY 'jfkodf080980LLL87877!!!';
+GRANT ALL PRIVILEGES ON *.* TO 'oozie'@'localhost';
+CREATE USER 'oozie'@'dev.local' IDENTIFIED BY 'jfkodf080980LLL87877!!!';
+GRANT ALL PRIVILEGES ON *.* TO 'oozie'@'dev.local';
+FLUSH PRIVILEGES;
+exit;
+
+mysql -u oozie -p
+CREATE DATABASE oozie;
+exit;
+
+# +++++++++++++ #
+#   AMBARI      #
+# +++++++++++++ #
+
+sudo ambari-server start
+#goto ambari web console 
+#eg. http://gphdpdev.northeurope.cloudapp.azure.com:8080/#/login
+
+-- Install HDP 2.6 with repo 2.6.2
+-- Install HDP 2.6 with repo 2.6.2
+-- Create Cluster; When selecting key, use the bottom Private one 
+-- use "hdp_admin" user
+-- Install HDFS, Yarn, Spark, Ambari Metrics, Hive (needed because of Spark), No Zookeeper
+-- assign EVERYTHING on all slaves and clients
+Admin Name : admin
+Cluster Name : b2hdp
+Total Hosts : 1 (1 new)
+Repositories:
+	redhat7 (HDP-2.6): 
+		http://public-repo-1.hortonworks.com/HDP/centos7/2.x/updates/2.6.2.0
+	redhat7 (HDP-UTILS-1.1.0.21): 
+		http://public-repo-1.hortonworks.com/HDP-UTILS-1.1.0.21/repos/centos7
+Services:
+	HDFS
+		DataNode : 1 host
+		NameNode : dev.local
+		NFSGateway : 0 host
+		SNameNode : dev.local
+	YARN + MapReduce2
+		App Timeline Server : dev.local
+		NodeManager : 1 host
+		ResourceManager : dev.local
+	Tez
+		Clients : 1 host
+	Hive
+		Metastore : dev.local
+		HiveServer2 : dev.local
+		WebHCat Server : dev.local
+		Database : Existing MySQL / MariaDB Database
+	Pig
+		Clients : 1 host
+	Oozie
+		Server : dev.local
+		Database : Existing MySQL / MariaDB Database
+	ZooKeeper
+		Server : dev.local
+	Ambari Infra
+		Infra Solr Instance : dev.local
+	Ambari Metrics
+		Metrics Collector : dev.local
+		Grafana : dev.local
+	SmartSense
+		Activity Analyzer : dev.local
+		Activity Explorer : dev.local
+		HST Server : dev.local
+	Spark
+		Livy Server : 0 host
+		History Server : dev.local
+		Thrift Server : 0 host	
+	Spark2
+		Livy for Spark2 Server : 0 host
+		History Server : dev.local
+		Thrift Server : 0 host
+	Zeppelin Notebook
+		Notebook : dev.local
+	Slider
+		Clients : 1 host
+
++++++++++++++++
++ AMBARI HDFS +
++++++++++++++++
+
+The cluster consists of 1 hosts
+Installed and started services successfully on 1 new host
+	Master services installed
+	NameNode installed on dev.local
+	SNameNode installed on dev.local
+	ResourceManager installed on dev.local
+	History Server installed on dev.local
+	HiveServer2 installed on dev.local
+	Oozie Server installed on dev.local
+All services started
+All tests passed
+Install and start completed in 64 minutes and 1 seconds
+		
++++++++++++++++
++  TEST HDFS  +
++++++++++++++++
+
+exit
+su - hdfs
+hdfs dfs -mkdir /user/admin
+hdfs dfs -chown admin:hadoop /user/admin
+echo "1,2,Hello" > test.csv
+hdfs dfs -ls /user/admin
+hdfs dfs -put test.csv /user/admin
+hdfs dfs -ls /user/admin
+hdfs dfs -cat /user/admin/test.csv
+exit
+
+++++++++++++++++++
++SETUP SPARK 1.6 +
+++++++++++++++++++
+
+sudo su -
+sudo vi /etc/bash.bashrc
+-- Type G, I (in VI)
+Paste ;
+## Paths in bash.bashrc FOR AMBARI ##
+export JAVA_HOME=/usr/jdk64/jdk1.8.0_112
+export HADOOP_CONF_DIR=/etc/hadoop/conf
+export SPARK_HOME=/usr/hdp/2.6.2.0-205/spark/
+export SPARK_CONF_DIR=$SPARK_HOME/conf
+#export SPARK_MAJOR_VERSION=2
+export PATH=$PATH:$SPARK_HOME/bin
+
+exit
+sudo su -
+su - cluster_admin
+
+++++++++++++++++
++TEST SPARK 1.6+
+++++++++++++++++
+
+spark-submit --version
+
+# YOU SHOULD SEE THIS
+Multiple versions of Spark are installed but SPARK_MAJOR_VERSION is not set
+Spark1 will be picked by default
+Welcome to
+      ____              __
+     / __/__  ___ _____/ /__
+    _\ \/ _ \/ _ `/ __/  '_/
+   /___/ .__/\_,_/_/ /_/\_\   version 1.6.3
+      /_/
+
+Type --help for more information.
+
+# LUNCH EXAMPLE
+spark-submit --class org.apache.spark.examples.SparkPi --queue default $SPARK_HOME/examples/jars/spark-examples*.jar 10
+
+# should see "Pi is roughly 3.140967140967141"	
+
+++++++++++++++++
++ SETUP SPARK 2+
+++++++++++++++++
+
+sudo su -
+vi /etc/bashrc
+-- Type G, I (in VI)
+Paste ;
+## Paths in bashrc FOR AMBARI ##
+export JAVA_HOME=/usr/jdk64/jdk1.8.0_112
+export HADOOP_CONF_DIR=/etc/hadoop/conf
+export SPARK_HOME=/usr/hdp/2.6.2.0-205/spark2/
+export SPARK_CONF_DIR=$SPARK_HOME/conf
+export SPARK_MAJOR_VERSION=2
+export PATH=$PATH:$SPARK_HOME/bin
+
+exit
+sudo su -
+su - cluster_admin
+
+++++++++++++++++
++  TEST SPARK 2+
+++++++++++++++++
+
+spark-submit --version
+
+# YOU SHOULD SEE THIS
+SPARK_MAJOR_VERSION is set to 2, using Spark2
+Welcome to
+      ____              __
+     / __/__  ___ _____/ /__
+    _\ \/ _ \/ _ `/ __/  '_/
+   /___/ .__/\_,_/_/ /_/\_\   version 2.1.1.2.6.2.0-205
+      /_/
+
+Using Scala version 2.11.8, Java HotSpot(TM) 64-Bit Server VM, 1.8.0_112
+Branch HEAD
+Compiled by user jenkins on 2017-08-26T09:32:23Z
+Revision a2efc34efde0fd268a9f83ea1861bd2548a8c188
+Url git@github.com:hortonworks/spark2.git
+Type --help for more information.
+
+# LUNCH EXAMPLE
+spark-submit --class org.apache.spark.examples.SparkPi --num-executors 2 --driver-memory 512m --executor-memory 512m --executor-cores 2 --queue default $SPARK_HOME/examples/jars/spark-examples*.jar 10
+
+# should see "Pi is roughly 3.143307143307143"		
+
+++++++++++++++++
++ HUE INSTALL +
+++++++++++++++++
+https://docs.hortonworks.com/HDPDocuments/HDP2/HDP-2.6.2/bk_command-line-installation/content/configure_hdp_support_hue.html
+http://hadooppowered.com/2014/05/25/install-or-remove-services-in-HUE/
+#Stop All Ambari services
+sudo yum install -y hue
+
+#Using Hue with MySQL
+mysql -u root -p
+CREATE USER hue IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES on *.* to 'hue'@'localhost' WITH GRANT OPTION;
+GRANT ALL on hue.* to 'hue'@'localhost' IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES on *.* to 'hue'@'dev.local' WITH GRANT OPTION;
+GRANT ALL on hue.* to 'hue'@'dev.local' IDENTIFIED BY 'password';
+GRANT ALL PRIVILEGES on *.* to 'hue'@'%' WITH GRANT OPTION;
+GRANT ALL on hue.* to 'hue'@'%' IDENTIFIED BY 'password';
+FLUSH PRIVILEGES;
+exit
+
+mysql -u hue -p
+CREATE DATABASE hue;
+SHOW DATABASES;
+exit
+
+cd /usr/lib/hue
+source build/env/bin/activate
+hue syncdb --noinput
+hue migrate
+deactivate
+
+#check the installation
+/etc/init.d/hue start
+/etc/init.d/hue status
+/etc/init.d/hue stop
+
+++++++++++++++++
++ Test WebHDFS +
+++++++++++++++++
+
+curl -i "http://dev.local:50070/webhdfs/v1/user/admin/?op=LISTSTATUS"
+
+++++++++++++++++
++ SolR INSTALL +
+++++++++++++++++
+
+# https://docs.hortonworks.com/HDPDocuments/HDP2/HDP-2.6.0/bk_solr-search-installation/content/ch_hdp-search-install-ambari.html
+cd /tmp
+wget http://public-repo-1.hortonworks.com/HDP-SOLR/hdp-solr-ambari-mp/solr-service-mpack-2.2.8.tar.gz
+sudo -i 
+ambari-server install-mpack --mpack=/tmp/solr-service-mpack-2.2.8.tar.gz
+yum install -y lucidworks-hdpsearch
+# https://doc.lucidworks.com/lucidworks-hdpsearch/2.6/Guide-Install-Ambari.html#_startup-option-reference
+
+Solr
+	Solr : dev.local
+
+# in Ambari restart all services
+
+sudo -u hdfs hdfs dfsadmin -safemode leave
+
+++++++++++++++++
++ NiFI Setup   +
+++++++++++++++++
+
+sudo -i
+cd /tmp
+wget http://mirror.easyname.ch/apache/nifi/1.3.0/nifi-1.3.0-bin.tar.gz
+tar -xzvf nifi-1.3.0-bin.tar.gz
+
+mv ./nifi-1.3.0 /etc/
+cd /etc/nifi-1.3.0/bin
+./nifi.sh install
+
+cd ../conf
+# change 
+# nifi.web.http.host=0.0.0.0
+# nifi.web.http.port=8282
+
+vi nifi.properties
+
+cd ../bin/
+# set JAVA_HOME
+# export JAVA_HOME=/usr/jdk64/jdk1.8.0_112
+vi nifi-env.sh
+
+systemctl enable nifi
+systemctl start nifi
+
+++++++++++++++++
++ VORA INSTALL +
+++++++++++++++++
+
+#Prepare the Document Store Server
+sudo yum install -y numactl
+
+#Prepare the Disk Engine Server
+sudo yum install libtool libtool-ltdl
+
+++++++++++++++++++++++++++
++ AMBARI CLUSTER INSTALL +
+++++++++++++++++++++++++++
+
+The cluster consists of 4 hosts
+Installed and started services successfully on 4 new hosts
+Master services installed
+	SNameNode installed on master.local
+	NameNode installed on master.local
+	ResourceManager installed on master.local
+	History Server installed on master.local
+	HiveServer2 installed on master.local
+	Oozie Server installed on master.local
+All services started
+All tests passed
+	Install and start completed in 50 minutes and 51 seconds
+
