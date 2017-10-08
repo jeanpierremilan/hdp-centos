@@ -34,14 +34,8 @@ echo "UUID=XXXXXXXXXX /mnt/data ext4 defaults 0 0" | tee -a /etc/fstab
 #Check DNS and NSCD in all nodes
 hostnamectl set-hostname dev.local
 echo "10.0.0.5 dev.local" | tee -a /etc/hosts
-echo "10.0.0.4 master.local" | tee -a /etc/hosts
-echo "10.0.0.6 data1.local" | tee -a /etc/hosts
-echo "10.0.0.7 data2.local" | tee -a /etc/hosts
-echo "10.0.0.8 data3.local" | tee -a /etc/hosts
 
 sed -i 's/localhost.localdomain/dev.local/g' /etc/sysconfig/network
-
-for i in {dev.local,master.local,data1.local,data2.local,data3.local}; do ping -c 2 $i; done
 
 #Enable NTP on the Cluster
 systemctl enable ntpd
@@ -128,8 +122,6 @@ EoLRj8cCgYEAyPWOPYjJkvZcqwt/tXj482sA6Oe5iEOA+iuyKygiPzH76nGtSMOX
 dcqquemM9ZgnAHMEdMl80ehTml18rrWTk6yscK0n04ju0T2oD5eg7mc4xq3LWpXU
 bjUq+voiTLlHqWPLBOTulDZ/eIpv7Gi9xfMn40Ing+x6R2OhC28cL08=
 -----END RSA PRIVATE KEY-----
-
-
 
 #Ambari, HDP, and HDF support umask values of 022
 umask
@@ -465,6 +457,11 @@ cd ../conf
 # nifi.web.http.port=8282
 
 vi nifi.properties
+
+cd ../bin/
+# set JAVA_HOME
+# export JAVA_HOME=/usr/jdk64/jdk1.8.0_112
+vi nifi-env.sh
 
 systemctl enable nifi
 systemctl start nifi
